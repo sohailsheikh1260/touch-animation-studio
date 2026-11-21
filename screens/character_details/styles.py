@@ -13,6 +13,18 @@ TOP_BUTTON_STYLE = (
     "  border: 1px solid #334155; border-radius: 8px;"
     "  padding: 8px 16px; font-size: 14px; }"
     "QPushButton:hover { background-color: #334155; }"
+    "QPushButton:disabled { background-color: #0f172a; color: #64748b;"
+    "  border-color: #1e293b; }"
+)
+
+# Destructive action (matches DELETE_BUTTON_STYLE used across the app).
+DELETE_BUTTON_STYLE = (
+    f"QPushButton {{ background-color: #7f1d1d; color: {TEXT};"
+    "  border: 1px solid #991b1b; border-radius: 8px;"
+    "  padding: 8px 16px; font-size: 14px; }"
+    "QPushButton:hover { background-color: #991b1b; }"
+    "QPushButton:disabled { background-color: #0f172a; color: #64748b;"
+    "  border-color: #1e293b; }"
 )
 
 INPUT_STYLE = (

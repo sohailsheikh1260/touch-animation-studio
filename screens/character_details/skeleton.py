@@ -321,8 +321,9 @@ class SkeletonPage(QWidget):
                 self._locked_images[bone_name] = set(rec_ids)
 
         if not self._bones:
-            self._clear()
+            # Capture before _clear() wipes self._character
             skeleton_id = self._character.get("skeleton_id")
+            self._clear()
             if skeleton_id:
                 self.info_label.setText("Skeleton template has no bones")
             else:

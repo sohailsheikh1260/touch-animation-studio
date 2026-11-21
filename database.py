@@ -134,6 +134,34 @@ def init_db() -> None:
         )
         conn.execute(
             """
+            CREATE TABLE IF NOT EXISTS markers (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                name        TEXT NOT NULL UNIQUE,
+                description TEXT NOT NULL DEFAULT '',
+                image_path  TEXT NOT NULL DEFAULT '',
+                created_at  TEXT NOT NULL,
+                updated_at  TEXT NOT NULL
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS marker_parts (
+                id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                marker_id    INTEGER NOT NULL,
+                part_name    TEXT    NOT NULL,
+                note         TEXT    NOT NULL DEFAULT '',
+                layer_index  INTEGER NOT NULL DEFAULT 0,
+                is_locked    INTEGER NOT NULL DEFAULT 0,
+                payload      TEXT    NOT NULL DEFAULT '{}',
+                created_at   TEXT    NOT NULL,
+                updated_at   TEXT    NOT NULL,
+                FOREIGN KEY (marker_id) REFERENCES markers (id) ON DELETE CASCADE
+            )
+            """
+        )
+        conn.execute(
+            """
             CREATE TABLE IF NOT EXISTS chat_sessions (
                 id          INTEGER PRIMARY KEY AUTOINCREMENT,
                 project_id  INTEGER NOT NULL,
@@ -274,6 +302,15 @@ def _migrate() -> None:
         if project_cols and "screen_height" not in project_cols:
             conn.execute(
                 "ALTER TABLE projects ADD COLUMN screen_height INTEGER NOT NULL DEFAULT 720"
+            )
+
+        # markers: optional image attached to a marker
+        marker_cols = [
+            r["name"] for r in conn.execute("PRAGMA table_info(markers)").fetchall()
+        ]
+        if marker_cols and "image_path" not in marker_cols:
+            conn.execute(
+                "ALTER TABLE markers ADD COLUMN image_path TEXT NOT NULL DEFAULT ''"
             )
 
         # clips: add track column for multi-row timelines
@@ -2189,6 +2226,238 @@ def count_knowledge() -> int:
     with closing(get_connection()) as conn:
         row = conn.execute("SELECT COUNT(*) AS n FROM knowledge").fetchone()
         return row["n"]
+
+
+# ---------------------------------------------------------------------------
+# Markers CRUD (simple name + description)
+# ---------------------------------------------------------------------------
+
+
+def create_marker(name: str, description: str = "", image_path: str = "") -> sqlite3.Row:
+    """Create a marker. Raises ValueError if the name is taken/empty."""
+    name = name.strip()
+    if not name:
+        raise ValueError("Marker name cannot be empty.")
+    now = _now()
+    with closing(get_connection()) as conn:
+        try:
+            cur = conn.execute(
+                "INSERT INTO markers (name, description, image_path, created_at, updated_at)"
+                " VALUES (?, ?, ?, ?, ?)",
+                (name, description.strip(), image_path.strip(), now, now),
+            )
+            conn.commit()
+        except sqlite3.IntegrityError as exc:
+            raise ValueError(f"A marker named '{name}' already exists.") from exc
+        return get_marker(cur.lastrowid)
+
+
+def get_marker(marker_id: int) -> sqlite3.Row:
+    with closing(get_connection()) as conn:
+        return conn.execute(
+            "SELECT * FROM markers WHERE id = ?", (marker_id,)
+        ).fetchone()
+
+
+def list_markers() -> list[sqlite3.Row]:
+    with closing(get_connection()) as conn:
+        return conn.execute(
+            "SELECT * FROM markers ORDER BY updated_at DESC"
+        ).fetchall()
+
+
+def update_marker(
+    marker_id: int,
+    name: str,
+    description: str,
+    image_path: str | None = None,
+) -> None:
+    """Update a marker's name/description (and optionally its image).
+
+    Pass image_path=None to keep the current image, "" to clear it.
+    """
+    name = name.strip()
+    if not name:
+        raise ValueError("Marker name cannot be empty.")
+    with closing(get_connection()) as conn:
+        try:
+            if image_path is None:
+                conn.execute(
+                    "UPDATE markers SET name = ?, description = ?, updated_at = ?"
+                    " WHERE id = ?",
+                    (name, description.strip(), _now(), marker_id),
+                )
+            else:
+                conn.execute(
+                    "UPDATE markers SET name = ?, description = ?, image_path = ?,"
+                    " updated_at = ? WHERE id = ?",
+                    (name, description.strip(), image_path.strip(), _now(), marker_id),
+                )
+            conn.commit()
+        except sqlite3.IntegrityError as exc:
+            raise ValueError(f"A marker named '{name}' already exists.") from exc
+
+
+def delete_marker(marker_id: int) -> sqlite3.Row:
+    """Delete a marker row (and its markup boxes) and return it."""
+    row = get_marker(marker_id)
+    if row is None:
+        return None
+    with closing(get_connection()) as conn:
+        conn.execute("DELETE FROM marker_parts WHERE marker_id = ?", (int(marker_id),))
+        conn.execute("DELETE FROM markers WHERE id = ?", (marker_id,))
+        conn.commit()
+    return row
+
+
+def count_markers() -> int:
+    with closing(get_connection()) as conn:
+        row = conn.execute("SELECT COUNT(*) AS n FROM markers").fetchone()
+        return row["n"]
+
+
+# ---------------------------------------------------------------------------
+# Marker body-parts (markup boxes) CRUD - mirrors character_parts
+# ---------------------------------------------------------------------------
+
+
+def create_marker_part(
+    marker_id: int,
+    part_name: str,
+    note: str = "",
+    payload: str = "{}",
+    layer_index: int | None = None,
+    is_locked: bool | None = None,
+) -> sqlite3.Row:
+    """Add a markup box for a marker (name + JSON payload).
+
+    `layer_index` is the draw-order index (derived from the payload "z" when
+    omitted, so imports keep their ordering). `is_locked` follows the same
+    rule from the payload's "locked" key.
+    """
+    part_name = part_name.strip()
+    if not part_name:
+        raise ValueError("Part name cannot be empty.")
+    if layer_index is None:
+        try:
+            data = _json.loads(payload) if isinstance(payload, str) else payload
+            layer_index = int((data or {}).get("z", 0))
+        except (ValueError, TypeError):
+            layer_index = 0
+    if is_locked is None:
+        try:
+            data = _json.loads(payload) if isinstance(payload, str) else payload
+            is_locked = bool((data or {}).get("locked", False))
+        except (ValueError, TypeError):
+            is_locked = False
+    now = _now()
+    with closing(get_connection()) as conn:
+        cur = conn.execute(
+            "INSERT INTO marker_parts (marker_id, part_name, note, layer_index,"
+            " is_locked, payload, created_at, updated_at)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                int(marker_id), part_name, note.strip(), int(layer_index),
+                1 if is_locked else 0, str(payload), now, now,
+            ),
+        )
+        conn.commit()
+        return get_marker_part(cur.lastrowid)
+
+
+def get_marker_part(part_id: int) -> sqlite3.Row | None:
+    with closing(get_connection()) as conn:
+        return conn.execute(
+            "SELECT * FROM marker_parts WHERE id = ?", (int(part_id),)
+        ).fetchone()
+
+
+def list_marker_parts(marker_id: int) -> list[sqlite3.Row]:
+    with closing(get_connection()) as conn:
+        return conn.execute(
+            "SELECT * FROM marker_parts WHERE marker_id = ? ORDER BY id",
+            (int(marker_id),),
+        ).fetchall()
+
+
+def update_marker_part(
+    part_id: int,
+    part_name: str,
+    note: str = "",
+    payload: str = "{}",
+    layer_index: int | None = None,
+    is_locked: bool | None = None,
+) -> None:
+    """Update a marker markup box.
+
+    `layer_index` / `is_locked` are left unchanged when passed as None.
+    """
+    part_name = part_name.strip()
+    if not part_name:
+        raise ValueError("Part name cannot be empty.")
+    sets = ["part_name = ?", "note = ?", "payload = ?", "updated_at = ?"]
+    params: list = [part_name, note.strip(), str(payload), _now()]
+    if layer_index is not None:
+        sets.append("layer_index = ?")
+        params.append(max(0, int(layer_index)))
+    if is_locked is not None:
+        sets.append("is_locked = ?")
+        params.append(1 if is_locked else 0)
+    params.append(int(part_id))
+    with closing(get_connection()) as conn:
+        conn.execute(
+            f"UPDATE marker_parts SET {', '.join(sets)} WHERE id = ?",
+            params,
+        )
+        conn.commit()
+
+
+def set_marker_part_layer(part_id: int, layer_index: int) -> None:
+    """Set a marker box's draw-order index (clamped at 0)."""
+    with closing(get_connection()) as conn:
+        conn.execute(
+            "UPDATE marker_parts SET layer_index = ?, updated_at = ? WHERE id = ?",
+            (max(0, int(layer_index)), _now(), int(part_id)),
+        )
+        conn.commit()
+
+
+def bump_marker_part_layer(part_id: int, delta: int) -> int | None:
+    """Shift a marker box's draw-order index by delta; returns the new value."""
+    part = get_marker_part(part_id)
+    if part is None:
+        return None
+    try:
+        current = int(part["layer_index"])
+    except (IndexError, KeyError, TypeError, ValueError):
+        current = 0
+    new_layer = max(0, current + int(delta))
+    if new_layer != current:
+        set_marker_part_layer(part_id, new_layer)
+    return new_layer
+
+
+def set_marker_part_locked(part_id: int, locked: bool) -> None:
+    """Set a marker box's lock state."""
+    with closing(get_connection()) as conn:
+        conn.execute(
+            "UPDATE marker_parts SET is_locked = ?, updated_at = ? WHERE id = ?",
+            (1 if locked else 0, _now(), int(part_id)),
+        )
+        conn.commit()
+
+
+def delete_marker_part(part_id: int) -> None:
+    with closing(get_connection()) as conn:
+        conn.execute("DELETE FROM marker_parts WHERE id = ?", (int(part_id),))
+        conn.commit()
+
+
+def delete_marker_parts_by_marker(marker_id: int) -> None:
+    """Drop every markup box of a marker (used when the marker goes away)."""
+    with closing(get_connection()) as conn:
+        conn.execute("DELETE FROM marker_parts WHERE marker_id = ?", (int(marker_id),))
+        conn.commit()
 
 
 # ---------------------------------------------------------------------------

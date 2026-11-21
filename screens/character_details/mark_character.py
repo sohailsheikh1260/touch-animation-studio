@@ -31,6 +31,7 @@ from screens.character import image_store
 from screens.character_details.export import export_character, import_character
 from screens.character_details.styles import (
     ALL_PART_NAMES,
+    DELETE_BUTTON_STYLE,
     HEADING_STYLE,
     IMAGE_PANEL_STYLE,
     INFO_TEXT,
@@ -50,12 +51,63 @@ from screens.character_details.styles import (
 ICON = "🧍"
 
 
+class CharacterMarkStore:
+    """Data access used by the Mark tab when the subject is a character.
+
+    MarkCharacterPage never talks to SQLite directly - it goes through a
+    store, so the identical UI can be reused for other subjects (see
+    screens/marker/mark_store.py for the marker variant).
+    """
+
+    kind = "Character"
+    icon = ICON
+    part_names = ALL_PART_NAMES
+    image_store = image_store  # screens.character.image_store
+    fill_canvas = False  # keep the source aspect ratio on the 2048² canvas
+
+    def get_owner(self, owner_id: int):
+        return database.get_character(owner_id)
+
+    def list_parts(self, owner_id: int) -> list:
+        return database.list_character_parts(owner_id)
+
+    def get_part(self, part_id: int):
+        return database.get_character_part(part_id)
+
+    def create_part(self, owner_id: int, part_name: str, note: str = "", payload: str = "{}"):
+        return database.create_character_part(owner_id, part_name, note, payload)
+
+    def update_part(self, part_id: int, part_name: str, note: str = "", payload: str = "{}"):
+        return database.update_character_part(part_id, part_name, note, payload)
+
+    def delete_part(self, part_id: int) -> None:
+        database.delete_character_part(part_id)
+
+    def set_part_locked(self, part_id: int, locked: bool) -> None:
+        database.set_character_part_locked(part_id, locked)
+
+    def bump_part_layer(self, part_id: int, delta: int):
+        return database.bump_character_part_layer(part_id, delta)
+
+    def export_owner(self, owner_id: int, parent) -> None:
+        export_character(owner_id, parent)
+
+    def import_owner(self, owner_id: int, parent) -> bool:
+        return import_character(owner_id, parent)
+
+
 class MarkCharacterPage(QWidget):
     """Tab 1: mark/markup the character image with body parts."""
 
-    def __init__(self, set_status=None, parent: QWidget | None = None) -> None:
+    def __init__(
+        self,
+        set_status=None,
+        parent: QWidget | None = None,
+        store=None,
+    ) -> None:
         super().__init__(parent)
         self._set_status = set_status or (lambda message: None)
+        self._store = store or CharacterMarkStore()
         self._character_id: int | None = None
         self._zoom = 0.33  # default zoom: 33% (Mark tab only)
         self._offset = QPoint(0, 0)
@@ -187,7 +239,7 @@ class MarkCharacterPage(QWidget):
         self.part_input = QComboBox()
         self.part_input.setEditable(True)
         self.part_input.setInsertPolicy(QComboBox.NoInsert)
-        self.part_input.addItems(ALL_PART_NAMES)
+        self.part_input.addItems(self._store.part_names)
         self.part_input.setStyleSheet(INPUT_STYLE)
         self.add_part_btn = QPushButton("＋ Add Part")
         self.add_part_btn.setCursor(Qt.PointingHandCursor)
@@ -196,9 +248,27 @@ class MarkCharacterPage(QWidget):
         part_input_row.addWidget(self.part_input, 1)
         part_input_row.addWidget(self.add_part_btn)
 
+        # Bulk actions: one full-width button per row so the narrow (20%)
+        # sidebar never overflows horizontally, even at the minimum window size.
+        self.add_all_btn = QPushButton("＋ Add All Parts")
+        self.add_all_btn.setCursor(Qt.PointingHandCursor)
+        self.add_all_btn.setStyleSheet(TOP_BUTTON_STYLE)
+        self.add_all_btn.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.add_all_btn.setEnabled(False)  # enabled when parts are missing
+        self.add_all_btn.clicked.connect(self._on_add_all_parts)
+
+        self.delete_all_btn = QPushButton("🗑 Delete All Parts")
+        self.delete_all_btn.setCursor(Qt.PointingHandCursor)
+        self.delete_all_btn.setStyleSheet(DELETE_BUTTON_STYLE)
+        self.delete_all_btn.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.delete_all_btn.setEnabled(False)  # enabled when parts exist
+        self.delete_all_btn.clicked.connect(self._on_delete_all_parts)
+
         sidebar.addWidget(parts_caption)
         sidebar.addWidget(self.parts_host, 1)
         sidebar.addLayout(part_input_row)
+        sidebar.addWidget(self.add_all_btn)
+        sidebar.addWidget(self.delete_all_btn)
         sidebar.addStretch()
 
         body = QHBoxLayout()
@@ -209,23 +279,27 @@ class MarkCharacterPage(QWidget):
 
     # ============================================================ Public API
     def show_character(self, character) -> None:
-        """Fill the tab with the given character row."""
-        self._character_id = character["id"]
+        """Fill the tab with the given subject row (character or marker)."""
+        self.show_owner(character)
+
+    def show_owner(self, row) -> None:
+        """Fill the tab with the given subject row (character or marker)."""
+        self._character_id = row["id"]
         self._selected_part_id = None
         self._drag = None
         self._live = {}
         self._boxes = {}
-        self.details_name.setText(f"{ICON}  {character['name']}")
-        self.details_id.setText(str(character["id"]))
+        self.details_name.setText(f"{self._store.icon}  {row['name']}")
+        self.details_id.setText(str(row["id"]))
 
-        path = image_store.absolute_path(character["image_path"])
-        if character["image_path"] and path.is_file():
-            self.details_image_path.setText(f"images/{path.name}")
+        path = self._store.image_store.absolute_path(row["image_path"])
+        if row["image_path"] and path.is_file():
+            self.details_image_path.setText(f"{path.parent.name}/{path.name}")
         else:
             self.details_image_path.setText("—")
 
-        self.details_created.setText(character["created_at"])
-        self.details_updated.setText(character["updated_at"])
+        self.details_created.setText(row["created_at"])
+        self.details_updated.setText(row["updated_at"])
 
         self._apply_image_view()
         self._refresh_parts()
@@ -261,15 +335,15 @@ class MarkCharacterPage(QWidget):
             if widget is not None:
                 widget.deleteLater()
 
-        parts = database.list_character_parts(self._character_id)
+        parts = self._store.list_parts(self._character_id)
         # Sort by the unified draw-order index (shared with the Skeleton and
         # Animation tabs), then id.
         parts = sorted(parts, key=lambda p: (self._layer_of_part(p), p["id"]))
         # Load the character image once for thumbnails
         stage_pix = QPixmap()
-        character = database.get_character(self._character_id)
+        character = self._store.get_owner(self._character_id)
         if character is not None and character["image_path"]:
-            path = image_store.absolute_path(character["image_path"])
+            path = self._store.image_store.absolute_path(character["image_path"])
             if path.is_file():
                 stage_pix = QPixmap(str(path))
         for part in parts:
@@ -393,16 +467,18 @@ class MarkCharacterPage(QWidget):
     def _refresh_part_dropdown(self) -> None:
         """Hide already-added part names from the dropdown."""
         if self._character_id is None:
+            self._update_bulk_buttons(set(), 0)
             return
         try:
-            parts = database.list_character_parts(self._character_id)
+            parts = self._store.list_parts(self._character_id)
         except Exception:
             parts = []
         used = {p["part_name"] for p in parts}
+        self._update_bulk_buttons(used, len(parts))
         current = self.part_input.currentText()
         self.part_input.blockSignals(True)
         self.part_input.clear()
-        for name in ALL_PART_NAMES:
+        for name in self._store.part_names:
             if name in used:
                 continue
             self.part_input.addItem(name)
@@ -414,19 +490,10 @@ class MarkCharacterPage(QWidget):
             self.part_input.setCurrentIndex(-1)
             self.part_input.setEditText("")
 
-    def _on_add_part(self) -> None:
-        if self._character_id is None:
-            return
-        character = database.get_character(self._character_id)
-        if character is None:
-            self._refresh_parts()
-            self._set_status("Character no longer exists.")
-            return
-        name = self.part_input.currentText().strip()
-        if not name:
-            return
-        # Default coordinates/size = 200 (user can drag to reposition in Assemble tab)
-        payload = json.dumps(
+    @staticmethod
+    def _default_part_payload() -> str:
+        """Default coordinates/size for a new part (drag to reposition later)."""
+        return json.dumps(
             {
                 "top": 200,
                 "left": 200,
@@ -436,8 +503,27 @@ class MarkCharacterPage(QWidget):
                 "y": 200,
             }
         )
+
+    def _update_bulk_buttons(self, used: set, part_count: int) -> None:
+        """Sync the bulk action buttons with the parts currently added."""
+        missing = [name for name in self._store.part_names if name not in used]
+        self.add_all_btn.setEnabled(bool(missing))
+        self.delete_all_btn.setEnabled(part_count > 0)
+
+    def _on_add_part(self) -> None:
+        if self._character_id is None:
+            return
+        character = self._store.get_owner(self._character_id)
+        if character is None:
+            self._refresh_parts()
+            self._set_status(f"{self._store.kind} no longer exists.")
+            return
+        name = self.part_input.currentText().strip()
+        if not name:
+            return
+        payload = self._default_part_payload()
         try:
-            database.create_character_part(self._character_id, name, "", payload)
+            self._store.create_part(self._character_id, name, "", payload)
         except ValueError as exc:
             QMessageBox.warning(self, "Cannot add part", str(exc))
             return
@@ -448,8 +534,72 @@ class MarkCharacterPage(QWidget):
         self._apply_image_view()
         self._set_status(f"Added body part '{name}'.")
 
+    def _on_add_all_parts(self) -> None:
+        """Add every standard part that is not on the character yet."""
+        if self._character_id is None:
+            return
+        character = self._store.get_owner(self._character_id)
+        if character is None:
+            self._refresh_parts()
+            self._set_status(f"{self._store.kind} no longer exists.")
+            return
+        try:
+            parts = self._store.list_parts(self._character_id)
+        except Exception:
+            parts = []
+        used = {p["part_name"] for p in parts}
+        missing = [name for name in self._store.part_names if name not in used]
+        if not missing:
+            self._refresh_parts()
+            self._set_status("All body parts are already added.")
+            return
+        payload = self._default_part_payload()
+        added = 0
+        for name in missing:
+            try:
+                self._store.create_part(self._character_id, name, "", payload)
+            except ValueError:
+                continue  # skip names the database rejects
+            added += 1
+        self._refresh_parts()
+        self._apply_image_view()
+        self._set_status(f"Added {added} missing body part(s).")
+
+    def _on_delete_all_parts(self) -> None:
+        """Remove every body part of the character (after confirmation)."""
+        if self._character_id is None:
+            return
+        try:
+            parts = self._store.list_parts(self._character_id)
+        except Exception:
+            parts = []
+        if not parts:
+            self._refresh_parts()
+            self._set_status("No body parts to delete.")
+            return
+        answer = QMessageBox.question(
+            self,
+            "Delete all parts",
+            f"Delete all {len(parts)} body part(s) of this character?\n"
+            "This cannot be undone.",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if answer != QMessageBox.Yes:
+            return
+        for part in parts:
+            self._store.delete_part(part["id"])
+        # Drop selection / live-drag state tied to the removed parts
+        self._selected_part_id = None
+        self._drag = None
+        self._live = {}
+        self._boxes = {}
+        self._refresh_parts()
+        self._apply_image_view()
+        self._set_status(f"Deleted {len(parts)} body part(s).")
+
     def _on_delete_part(self, part_id: int) -> None:
-        database.delete_character_part(part_id)
+        self._store.delete_part(part_id)
         if self._selected_part_id == part_id:
             self._selected_part_id = None
         self._live.pop(part_id, None)
@@ -458,14 +608,14 @@ class MarkCharacterPage(QWidget):
         self._apply_image_view()
 
     def _on_toggle_lock(self, part_id: int) -> None:
-        part = database.get_character_part(part_id)
+        part = self._store.get_part(part_id)
         if part is None:
             return
         # The lock lives in character_parts.is_locked - the single state
         # shared with the Skeleton and Animation tabs.
         now_locked = not self._part_locked(part)
         try:
-            database.set_character_part_locked(part_id, now_locked)
+            self._store.set_part_locked(part_id, now_locked)
         except Exception as e:
             self._set_status(f"Failed to save lock state: {e}")
             return
@@ -477,7 +627,7 @@ class MarkCharacterPage(QWidget):
         self._apply_image_view()
 
     def _on_toggle_visibility(self, part_id: int) -> None:
-        part = database.get_character_part(part_id)
+        part = self._store.get_part(part_id)
         if part is None:
             return
         try:
@@ -486,7 +636,7 @@ class MarkCharacterPage(QWidget):
             data = {}
         data["visible"] = not bool(data.get("visible", True))
         try:
-            database.update_character_part(part_id, part["part_name"], part["note"] or "", json.dumps(data))
+            self._store.update_part(part_id, part["part_name"], part["note"] or "", json.dumps(data))
         except ValueError:
             return
         self._refresh_parts()
@@ -495,12 +645,12 @@ class MarkCharacterPage(QWidget):
     def _on_export(self) -> None:
         if self._character_id is None:
             return
-        export_character(self._character_id, self)
+        self._store.export_owner(self._character_id, self)
 
     def _on_import(self) -> None:
         if self._character_id is None:
             return
-        if import_character(self._character_id, self):
+        if self._store.import_owner(self._character_id, self):
             self._refresh_parts()
             self._apply_image_view()
 
@@ -511,7 +661,7 @@ class MarkCharacterPage(QWidget):
         (character_parts.layer_index), so reordering here reorders everywhere.
         """
         try:
-            new_layer = database.bump_character_part_layer(part_id, delta)
+            new_layer = self._store.bump_part_layer(part_id, delta)
         except Exception as e:
             self._set_status(f"Failed to update layer: {e}")
             return
@@ -524,12 +674,12 @@ class MarkCharacterPage(QWidget):
         # Build list of unused part names (plus the current one) for the dropdown
         used = set()
         try:
-            for p in database.list_character_parts(self._character_id):
+            for p in self._store.list_parts(self._character_id):
                 if p["id"] != part_id:
                     used.add(p["part_name"])
         except Exception:
             pass
-        available = [n for n in ALL_PART_NAMES if n not in used or n == old_name]
+        available = [n for n in self._store.part_names if n not in used or n == old_name]
 
         dlg = QDialog(self)
         dlg.setWindowTitle("Rename part")
@@ -556,11 +706,11 @@ class MarkCharacterPage(QWidget):
         new_name = combo.currentText().strip()
         if not new_name or new_name == old_name:
             return
-        part = database.get_character_part(part_id)
+        part = self._store.get_part(part_id)
         if part is None:
             return
         try:
-            database.update_character_part(
+            self._store.update_part(
                 part_id, new_name, part["note"] or "", part["payload"] or "{}"
             )
         except ValueError as exc:
@@ -581,7 +731,7 @@ class MarkCharacterPage(QWidget):
         self._refresh_parts()
         self._apply_image_view()
         if self._selected_part_id is not None:
-            part = database.get_character_part(part_id)
+            part = self._store.get_part(part_id)
             if part is not None:
                 self._set_status(f"Selected '{part['part_name']}' — drag to move, drag corners to resize.")
 
@@ -590,12 +740,12 @@ class MarkCharacterPage(QWidget):
         """Composite the character image with zoom + pan offset."""
         if self._character_id is None:
             return
-        character = database.get_character(self._character_id)
+        character = self._store.get_owner(self._character_id)
         if character is None:
             return
         pixmap = QPixmap()
         if character["image_path"]:
-            path = image_store.absolute_path(character["image_path"])
+            path = self._store.image_store.absolute_path(character["image_path"])
             if path.is_file():
                 pixmap = QPixmap(str(path))
         if pixmap.isNull():
@@ -605,10 +755,18 @@ class MarkCharacterPage(QWidget):
         base_w, base_h = 2048, 2048  # default render size
         canvas = QPixmap(base_w, base_h)
         canvas.fill(QColor("#0f172a"))  # white square background behind the image
+        # Stores with fill_canvas=True (markers) stretch the image over the whole
+        # 2048x2048 canvas; characters keep the source aspect ratio. Box math is
+        # unaffected - scale_x/scale_y are tracked separately.
+        aspect = (
+            Qt.IgnoreAspectRatio
+            if getattr(self._store, "fill_canvas", False)
+            else Qt.KeepAspectRatio
+        )
         scaled = pixmap.scaled(
             max(1, int(base_w * self._zoom)),
             max(1, int(base_h * self._zoom)),
-            Qt.KeepAspectRatio,
+            aspect,
             Qt.SmoothTransformation,
         )
         x = (base_w - scaled.width()) // 2 + self._offset.x()
@@ -627,7 +785,7 @@ class MarkCharacterPage(QWidget):
         fill_color = QColor(0xFF, 0x00, 0x00, 0x42)  # "#ff000042" semi-transparent red
         sel_pen = QColor("#ff0000")
         for part in sorted(
-            database.list_character_parts(self._character_id),
+            self._store.list_parts(self._character_id),
             key=lambda p: (self._layer_of_part(p), p["id"]),
         ):
             part_data = json.loads(part["payload"]) if part["payload"] else {}
@@ -739,7 +897,7 @@ class MarkCharacterPage(QWidget):
         live = self._live.get(part_id)
         if live is not None:
             return live
-        part = database.get_character_part(part_id)
+        part = self._store.get_part(part_id)
         return json.loads(part["payload"]) if part and part["payload"] else {}
 
     def _handle_at(self, rect: QRect, cpos: QPoint) -> int:
@@ -764,7 +922,7 @@ class MarkCharacterPage(QWidget):
             if rect is not None and rect.contains(cpos):
                 self._selected_part_id = pid
                 self._live[pid] = self._part_payload(pid)
-                part = database.get_character_part(pid)
+                part = self._store.get_part(pid)
                 self.details_image.setCursor(Qt.OpenHandCursor)
                 self._set_status(f"Selected '{part['part_name']}' — drag to move, drag corners to resize.")
                 self._apply_image_view()
@@ -778,7 +936,7 @@ class MarkCharacterPage(QWidget):
         if self._selected_part_id is None:
             return False
         # Locked parts cannot be moved/resized
-        part = database.get_character_part(self._selected_part_id)
+        part = self._store.get_part(self._selected_part_id)
         if part is not None and self._part_locked(part):
             return False
         cpos = self._event_canvas_pos(event)
@@ -864,10 +1022,10 @@ class MarkCharacterPage(QWidget):
         live = self._live.get(part_id)
         if not live:
             return
-        part = database.get_character_part(part_id)
+        part = self._store.get_part(part_id)
         if part is None:
             return
-        database.update_character_part(part_id, part["part_name"], part["note"] or "", json.dumps(live))
+        self._store.update_part(part_id, part["part_name"], part["note"] or "", json.dumps(live))
 
     def _finish_drag(self) -> None:
         drag = self._drag
@@ -877,7 +1035,7 @@ class MarkCharacterPage(QWidget):
             return
         self._persist_part(pid)
         self._live.pop(pid, None)
-        part = database.get_character_part(pid)
+        part = self._store.get_part(pid)
         if part is None:
             return
         self.details_image.setCursor(Qt.OpenHandCursor)

@@ -6,6 +6,9 @@
 *.pem
 *.key
 secrets.json
+backgrounds/
+audios/
+markers/
 
 # uv & Virtual Environments
 .venv/
@@ -13,6 +16,7 @@ venv/
 env/
 ENV/
 .uv/
+images/
 uv.toml.local
 
 # Python bytecode & build artifacts

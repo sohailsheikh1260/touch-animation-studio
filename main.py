@@ -47,6 +47,7 @@ from screens.character_mask_master.character_mask_master_screen import (
     CharacterMaskMasterScreen,
 )
 from screens.knowledge.knowledge_screen import INFO as KNOWLEDGE_INFO, KnowledgeScreen
+from screens.marker.marker_screen import INFO as MARKER_INFO, MarkerScreen
 from screens.since.since_screen import INFO as SINCE_INFO, SinceScreen
 from screens.project.project_screen import INFO as PROJECT_INFO, ProjectScreen
 from screens.skeleton_master.skeleton_master_screen import INFO as SKELETON_MASTER_INFO, SkeletonMasterScreen
@@ -64,6 +65,7 @@ MODULES = [
     (*SKELETON_MASTER_INFO, SkeletonMasterScreen),
     (*CHARACTER_MASK_MASTER_INFO, CharacterMaskMasterScreen),
     (*AI_CHAT_INFO, AIChatScreen),
+    (*MARKER_INFO, MarkerScreen),
 ]
 
 
