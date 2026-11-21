@@ -37,18 +37,10 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from screens.ai_chat.ai_chat_screen import INFO as AI_CHAT_INFO, AIChatScreen
-from screens.animation.animation_screen import INFO as ANIMATION_INFO, AnimationScreen
 from screens.audio.audio_screen import INFO as AUDIO_INFO, AudioScreen
 from screens.background.background_screen import INFO as BACKGROUND_INFO, BackgroundScreen
 from screens.character.character_screen import INFO as CHARACTER_INFO, CharacterScreen
-from screens.character_mask_master.character_mask_master_screen import (
-    INFO as CHARACTER_MASK_MASTER_INFO,
-    CharacterMaskMasterScreen,
-)
-from screens.knowledge.knowledge_screen import INFO as KNOWLEDGE_INFO, KnowledgeScreen
 from screens.marker.marker_screen import INFO as MARKER_INFO, MarkerScreen
-from screens.since.since_screen import INFO as SINCE_INFO, SinceScreen
 from screens.project.project_screen import INFO as PROJECT_INFO, ProjectScreen
 from screens.skeleton_master.skeleton_master_screen import INFO as SKELETON_MASTER_INFO, SkeletonMasterScreen
 from screens.theme import BG, CARD_LABEL_STYLE, CARD_STYLE, MUTED, TEXT
@@ -58,13 +50,8 @@ MODULES = [
     (*PROJECT_INFO, ProjectScreen),
     (*BACKGROUND_INFO, BackgroundScreen),
     (*CHARACTER_INFO, CharacterScreen),
-    (*ANIMATION_INFO, AnimationScreen),
     (*AUDIO_INFO, AudioScreen),
-    (*KNOWLEDGE_INFO, KnowledgeScreen),
-    (*SINCE_INFO, SinceScreen),
     (*SKELETON_MASTER_INFO, SkeletonMasterScreen),
-    (*CHARACTER_MASK_MASTER_INFO, CharacterMaskMasterScreen),
-    (*AI_CHAT_INFO, AIChatScreen),
     (*MARKER_INFO, MarkerScreen),
 ]
 

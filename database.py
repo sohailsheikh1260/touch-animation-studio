@@ -123,17 +123,6 @@ def init_db() -> None:
         conn.execute(_AUDIOS_TABLE_SQL)
         conn.execute(
             """
-            CREATE TABLE IF NOT EXISTS knowledge (
-                id          INTEGER PRIMARY KEY AUTOINCREMENT,
-                name        TEXT NOT NULL UNIQUE,
-                description TEXT NOT NULL DEFAULT '',
-                created_at  TEXT NOT NULL,
-                updated_at  TEXT NOT NULL
-            )
-            """
-        )
-        conn.execute(
-            """
             CREATE TABLE IF NOT EXISTS markers (
                 id          INTEGER PRIMARY KEY AUTOINCREMENT,
                 name        TEXT NOT NULL UNIQUE,
@@ -157,19 +146,6 @@ def init_db() -> None:
                 created_at   TEXT    NOT NULL,
                 updated_at   TEXT    NOT NULL,
                 FOREIGN KEY (marker_id) REFERENCES markers (id) ON DELETE CASCADE
-            )
-            """
-        )
-        conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS chat_sessions (
-                id          INTEGER PRIMARY KEY AUTOINCREMENT,
-                project_id  INTEGER NOT NULL,
-                title       TEXT    NOT NULL DEFAULT 'New Session',
-                messages    TEXT    NOT NULL DEFAULT '[]',
-                created_at  TEXT    NOT NULL,
-                updated_at  TEXT    NOT NULL,
-                FOREIGN KEY (project_id) REFERENCES projects (id) ON DELETE CASCADE
             )
             """
         )
@@ -781,66 +757,6 @@ def count_projects() -> int:
     with closing(get_connection()) as conn:
         row = conn.execute("SELECT COUNT(*) AS n FROM projects").fetchone()
         return row["n"]
-
-
-# ---------------------------------------------------------------------------
-# AI chat sessions
-# ---------------------------------------------------------------------------
-def create_chat_session(project_id: int) -> sqlite3.Row:
-    """Create an AI chat session for a project."""
-    project_id = int(project_id)
-    if get_project(project_id) is None:
-        raise ValueError("The selected project no longer exists.")
-    now = _now()
-    with closing(get_connection()) as conn:
-        cur = conn.execute(
-            "INSERT INTO chat_sessions (project_id, title, messages, created_at, updated_at)"
-            " VALUES (?, 'New Session', '[]', ?, ?)",
-            (project_id, now, now),
-        )
-        session_id = cur.lastrowid
-        conn.execute(
-            "UPDATE chat_sessions SET title = ? WHERE id = ?",
-            (f"Session {session_id}", session_id),
-        )
-        conn.commit()
-    return get_chat_session(session_id)
-
-
-def get_chat_session(session_id: int) -> sqlite3.Row | None:
-    with closing(get_connection()) as conn:
-        return conn.execute(
-            "SELECT s.*, p.name AS project_name"
-            " FROM chat_sessions s"
-            " JOIN projects p ON p.id = s.project_id"
-            " WHERE s.id = ?",
-            (int(session_id),),
-        ).fetchone()
-
-
-def list_chat_sessions() -> list[sqlite3.Row]:
-    with closing(get_connection()) as conn:
-        return conn.execute(
-            "SELECT s.*, p.name AS project_name"
-            " FROM chat_sessions s"
-            " JOIN projects p ON p.id = s.project_id"
-            " ORDER BY s.updated_at DESC, s.id DESC"
-        ).fetchall()
-
-
-def save_chat_session_messages(session_id: int, messages: list[dict]) -> None:
-    """Save a session's conversation history."""
-    clean_messages = [
-        {"role": str(message.get("role", "")), "content": str(message.get("content", ""))}
-        for message in messages
-        if isinstance(message, dict)
-    ]
-    with closing(get_connection()) as conn:
-        conn.execute(
-            "UPDATE chat_sessions SET messages = ?, updated_at = ? WHERE id = ?",
-            (_json.dumps(clean_messages, ensure_ascii=False), _now(), int(session_id)),
-        )
-        conn.commit()
 
 
 # ---------------------------------------------------------------------------
@@ -2156,75 +2072,6 @@ def delete_audios_by_project(project_id: int) -> list[sqlite3.Row]:
 def count_audios() -> int:
     with closing(get_connection()) as conn:
         row = conn.execute("SELECT COUNT(*) AS n FROM audios").fetchone()
-        return row["n"]
-
-
-# ---------------------------------------------------------------------------
-# Knowledge CRUD
-# ---------------------------------------------------------------------------
-def create_knowledge(name: str, description: str = "") -> sqlite3.Row:
-    """Create a knowledge entry. Raises ValueError if the name is taken/empty."""
-    name = name.strip()
-    if not name:
-        raise ValueError("Knowledge name cannot be empty.")
-    now = _now()
-    with closing(get_connection()) as conn:
-        try:
-            cur = conn.execute(
-                "INSERT INTO knowledge (name, description, created_at, updated_at)"
-                " VALUES (?, ?, ?, ?)",
-                (name, description.strip(), now, now),
-            )
-            conn.commit()
-        except sqlite3.IntegrityError as exc:
-            raise ValueError(f"A knowledge entry named '{name}' already exists.") from exc
-        return get_knowledge(cur.lastrowid)
-
-
-def get_knowledge(knowledge_id: int) -> sqlite3.Row:
-    with closing(get_connection()) as conn:
-        return conn.execute(
-            "SELECT * FROM knowledge WHERE id = ?", (knowledge_id,)
-        ).fetchone()
-
-
-def list_knowledge() -> list[sqlite3.Row]:
-    with closing(get_connection()) as conn:
-        return conn.execute(
-            "SELECT * FROM knowledge ORDER BY updated_at DESC"
-        ).fetchall()
-
-
-def update_knowledge(knowledge_id: int, name: str, description: str) -> None:
-    """Update a knowledge entry's name and description together."""
-    name = name.strip()
-    if not name:
-        raise ValueError("Knowledge name cannot be empty.")
-    with closing(get_connection()) as conn:
-        try:
-            conn.execute(
-                "UPDATE knowledge SET name = ?, description = ?, updated_at = ? WHERE id = ?",
-                (name, description.strip(), _now(), knowledge_id),
-            )
-            conn.commit()
-        except sqlite3.IntegrityError as exc:
-            raise ValueError(f"A knowledge entry named '{name}' already exists.") from exc
-
-
-def delete_knowledge(knowledge_id: int) -> sqlite3.Row:
-    """Delete a knowledge row and return it."""
-    row = get_knowledge(knowledge_id)
-    if row is None:
-        return None
-    with closing(get_connection()) as conn:
-        conn.execute("DELETE FROM knowledge WHERE id = ?", (knowledge_id,))
-        conn.commit()
-    return row
-
-
-def count_knowledge() -> int:
-    with closing(get_connection()) as conn:
-        row = conn.execute("SELECT COUNT(*) AS n FROM knowledge").fetchone()
         return row["n"]
 
 
