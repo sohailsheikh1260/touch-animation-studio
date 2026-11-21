@@ -1,0 +1,13 @@
+[project]
+name = "touch-animation"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "edge-tts>=7.3.1",
+    "groq>=1.7.0",
+    "imageio-ffmpeg>=0.8.1",
+    "pyside6>=6.12.0",
+    "pyttsx3>=2.99",
+]

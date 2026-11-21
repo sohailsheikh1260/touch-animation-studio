@@ -1,0 +1,63 @@
+# Environment variables & secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+secrets.json
+
+# uv & Virtual Environments
+.venv/
+venv/
+env/
+ENV/
+.uv/
+uv.toml.local
+
+# Python bytecode & build artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Testing, linting & type-checking caches
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+.tox/
+.nox/
+
+# Local databases & logs
+*.db
+*.sqlite
+*.sqlite3
+*.log
+
+# OS & Editors
+.DS_Store
+Thumbs.db
+desktop.ini
+.vscode/
+!.vscode/settings.json
+!.vscode/extensions.json
+.idea/
+*.swp
+*.swo
