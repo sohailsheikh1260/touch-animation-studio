@@ -27,6 +27,7 @@ from PySide6.QtWidgets import (
 import database
 from screens.character import image_store
 from screens.character_details import CharacterDetailsPage
+from screens.character_details.mark_character import copy_marker_marks
 from screens.theme import BG, CARD_BG, MUTED, TEXT
 
 ICON = "🧍"
@@ -349,13 +350,14 @@ class CharacterScreen(QWidget):
         layout.addWidget(skeleton_hint)
         layout.addWidget(self.drawer_skeleton)
 
-        # Character mask dropdown
-        mask_hint = QLabel("Mask (optional)")
-        mask_hint.setStyleSheet(f"color: {MUTED}; font-size: 12px; {CARD_LABEL_STYLE}")
-        self.drawer_mask = QComboBox()
-        self.drawer_mask.setStyleSheet(INPUT_STYLE)
-        layout.addWidget(mask_hint)
-        layout.addWidget(self.drawer_mask)
+        # Marker dropdown (create only): start from a marker's marks
+        self.marker_hint = QLabel("Marker (optional)")
+        self.marker_hint.setStyleSheet(f"color: {MUTED}; font-size: 12px; {CARD_LABEL_STYLE}")
+        self.drawer_marker = QComboBox()
+        self.drawer_marker.setStyleSheet(INPUT_STYLE)
+        self.drawer_marker.addItem("(No marker)", None)
+        layout.addWidget(self.marker_hint)
+        layout.addWidget(self.drawer_marker)
 
         image_hint = QLabel("Character image")
         image_hint.setStyleSheet(f"color: {MUTED}; font-size: 12px; {CARD_LABEL_STYLE}")
@@ -405,18 +407,18 @@ class CharacterScreen(QWidget):
         except Exception:
             pass
 
-        # Populate mask dropdown from Character Mask Master templates
-        self.drawer_mask.clear()
-        self.drawer_mask.addItem("(No mask)", None)
-        for mask in database.list_character_masks():
-            self.drawer_mask.addItem(mask["name"], mask["id"])
-
         if character_id is None:
             self.drawer_title.setText("Create Character")
             self.drawer_name.clear()
             self.drawer_character_type.setCurrentIndex(0)
             self.drawer_skeleton.setCurrentIndex(0)
-            self.drawer_mask.setCurrentIndex(0)
+            # Marker list only applies when creating a new character
+            self.drawer_marker.clear()
+            self.drawer_marker.addItem("(No marker)", None)
+            for marker in database.list_markers():
+                self.drawer_marker.addItem(marker["name"], marker["id"])
+            self.marker_hint.show()
+            self.drawer_marker.show()
             self._update_drawer_preview(None)
             self.delete_btn.hide()
         else:
@@ -434,11 +436,9 @@ class CharacterScreen(QWidget):
                 idx = self.drawer_skeleton.findData(skeleton_id)
                 if idx >= 0:
                     self.drawer_skeleton.setCurrentIndex(idx)
-            mask_id = character["mask_id"]
-            if mask_id:
-                idx = self.drawer_mask.findData(mask_id)
-                if idx >= 0:
-                    self.drawer_mask.setCurrentIndex(idx)
+            # Marker list is create-only: hidden while editing an existing character
+            self.marker_hint.hide()
+            self.drawer_marker.hide()
             self._update_drawer_preview(character["image_path"] or None)
             self.delete_btn.show()
 
@@ -523,7 +523,7 @@ class CharacterScreen(QWidget):
 
         skeleton_id = self.drawer_skeleton.currentData()
         character_type = self.drawer_character_type.currentText()
-        mask_id = self.drawer_mask.currentData()
+        marker_id = self.drawer_marker.currentData()
 
         try:
             stored = image_store.save_image(self._pending_image) if self._pending_image else None
@@ -538,7 +538,6 @@ class CharacterScreen(QWidget):
                     stored or "",
                     skeleton_id,
                     character_type=character_type,
-                    mask_id=mask_id,
                 )
                 message = f"Created '{character['name']}'."
                 new_id = character["id"]
@@ -562,12 +561,18 @@ class CharacterScreen(QWidget):
                         )
                 except Exception:
                     pass
+                # Marker option: copy the chosen marker's marks to the character
+                if marker_id:
+                    copied = copy_marker_marks(marker_id, new_id)
+                    message = (
+                        f"Created '{character['name']}' with {copied} mark(s) "
+                        f"from '{self.drawer_marker.currentText()}'."
+                    )
             else:
                 old = database.get_character(self._editing_id)
                 database.rename_character(self._editing_id, name)
                 database.update_character_skeleton(self._editing_id, skeleton_id)
                 database.update_character_type(self._editing_id, character_type)
-                database.assign_character_mask(self._editing_id, mask_id)
                 if stored:
                     database.update_character_image(self._editing_id, stored)
                     image_store.delete_image(old["image_path"])

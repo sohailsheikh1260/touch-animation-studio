@@ -20,7 +20,6 @@ from PySide6.QtWidgets import (
     QScrollArea,
     QStackedWidget,
     QTextEdit,
-    QTabWidget,
     QVBoxLayout,
     QWidget,
 )
@@ -74,11 +73,6 @@ PREVIEW_STYLE = (
 )
 
 DETAIL_STYLE = f"color: {MUTED}; font-size: 12px; {CARD_LABEL_STYLE}"
-
-BODY_FRAME_STYLE = (
-    f"QFrame {{ background-color: {CARD_BG};"
-    "  border: 1px solid #334155; border-radius: 12px; }}"
-)
 
 SAVE_BUTTON_STYLE = (
     "QPushButton { background-color: #16a34a; color: #e2e8f0;"
@@ -260,85 +254,6 @@ class MarkerScreen(QWidget):
     def _set_detail_status(self, message: str) -> None:
         self.detail_status.setText(message or "")
 
-    def _build_info_tab(self) -> QWidget:
-        """Second tab: image, name, description, meta + edit/delete actions."""
-        tab = QWidget()
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QFrame.NoFrame)
-        scroll.setStyleSheet("background-color: transparent; border: none;")
-        host = QWidget()
-        body = QVBoxLayout(host)
-        body.setContentsMargins(0, 8, 8, 8)
-        body.setSpacing(16)
-
-        # Image
-        self.detail_image = QLabel("No image")
-        self.detail_image.setStyleSheet(PREVIEW_STYLE)
-        self.detail_image.setAlignment(Qt.AlignCenter)
-        self.detail_image.setFixedHeight(300)
-        body.addWidget(self.detail_image)
-
-        # Name + description card
-        info = QFrame()
-        info.setStyleSheet(BODY_FRAME_STYLE)
-        info_layout = QVBoxLayout(info)
-        info_layout.setContentsMargins(20, 20, 20, 20)
-        info_layout.setSpacing(10)
-
-        self.info_name = QLabel("")
-        self.info_name.setStyleSheet(
-            f"color: {TEXT}; font-size: 24px; font-weight: bold; {CARD_LABEL_STYLE}"
-        )
-        self.info_name.setWordWrap(True)
-        info_layout.addWidget(self.info_name)
-
-        desc_hint = QLabel("Description")
-        desc_hint.setStyleSheet(f"color: {MUTED}; font-size: 12px; {CARD_LABEL_STYLE}")
-        info_layout.addWidget(desc_hint)
-
-        self.detail_description = QLabel("")
-        self.detail_description.setStyleSheet(
-            f"color: {TEXT}; font-size: 14px; {CARD_LABEL_STYLE}"
-        )
-        self.detail_description.setWordWrap(True)
-        self.detail_description.setAlignment(Qt.AlignTop | Qt.AlignLeft)
-        info_layout.addWidget(self.detail_description)
-
-        self.detail_meta = QLabel("")
-        self.detail_meta.setStyleSheet(
-            f"color: {MUTED}; font-size: 12px; {CARD_LABEL_STYLE}"
-        )
-        self.detail_meta.setWordWrap(True)
-        info_layout.addWidget(self.detail_meta)
-
-        body.addWidget(info)
-
-        # Actions
-        actions = QHBoxLayout()
-        actions.setSpacing(12)
-        self.edit_btn = QPushButton("✏️  Edit Marker")
-        self.edit_btn.setCursor(Qt.PointingHandCursor)
-        self.edit_btn.setStyleSheet(EDIT_BUTTON_STYLE)
-        self.edit_btn.clicked.connect(self._edit_from_details)
-
-        self.delete_btn = QPushButton("🗑  Delete Marker")
-        self.delete_btn.setCursor(Qt.PointingHandCursor)
-        self.delete_btn.setStyleSheet(DANGER_BUTTON_STYLE)
-        self.delete_btn.clicked.connect(self._delete_from_details)
-
-        actions.addWidget(self.edit_btn)
-        actions.addWidget(self.delete_btn)
-        actions.addStretch()
-        body.addLayout(actions)
-        body.addStretch()
-
-        scroll.setWidget(host)
-        outer = QVBoxLayout(tab)
-        outer.setContentsMargins(0, 0, 0, 0)
-        outer.addWidget(scroll, 1)
-        return tab
-
     def open_details(self, marker_id: int) -> None:
         entry = database.get_marker(marker_id)
         if entry is None:
@@ -346,7 +261,6 @@ class MarkerScreen(QWidget):
             return
         self._detail_id = marker_id
         self._fill_details(entry)
-        self.tabs.setCurrentIndex(0)  # land on the 🏷 Mark Character tab
         self.pages.setCurrentIndex(1)
         self.create_btn.hide()
 
@@ -358,33 +272,19 @@ class MarkerScreen(QWidget):
 
     def _fill_details(self, entry) -> None:
         self.detail_title.setText(f"{ICON}  {entry['name']}")
-        self.info_name.setText(f"{ICON}  {entry['name']}")
 
         desc = entry["description"].strip()
-        self.detail_description.setText(desc if desc else "No description provided.")
-        self.detail_description.setStyleSheet(
-            f"color: {TEXT if desc else MUTED}; font-size: 14px; {CARD_LABEL_STYLE}"
-        )
-
-        self.detail_meta.setText(
+        summary = desc if desc else "No description provided."
+        self.detail_info.setText(
+            f"{summary}\n"
             f"Created {entry['created_at']}  ·  Updated {entry['updated_at']}"
         )
+        self.detail_info.setStyleSheet(
+            f"color: {TEXT if desc else MUTED}; font-size: 13px;"
+        )
 
-        pixmap = QPixmap()
-        if entry["image_path"]:
-            path = image_store.absolute_path(entry["image_path"])
-            if path.is_file():
-                pixmap = QPixmap(str(path))
-        if not pixmap.isNull():
-            self.detail_image.setText("")
-            self.detail_image.setPixmap(
-                pixmap.scaled(760, 300, Qt.KeepAspectRatio, Qt.SmoothTransformation)
-            )
-        else:
-            self.detail_image.setPixmap(QPixmap())
-            self.detail_image.setText("No image for this marker")
-
-        # 🏷 Mark Character tab - same widget, marker-backed store
+        # 🏷 Mark Character page - same widget, marker-backed store
+        # (it renders the marker image and the image path line)
         self.mark_page.show_owner(entry)
 
     def _edit_from_details(self) -> None:

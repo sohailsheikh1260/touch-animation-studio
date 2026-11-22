@@ -51,6 +51,68 @@ from screens.character_details.styles import (
 ICON = "🧍"
 
 
+def default_part_payload() -> str:
+    """Default coordinates/size for a new part (drag to reposition later)."""
+    return json.dumps(
+        {
+            "top": 200,
+            "left": 200,
+            "width": 200,
+            "height": 200,
+            "x": 200,
+            "y": 200,
+        }
+    )
+
+
+def seed_default_marks(owner_id: int, store=None) -> int:
+    """Add every standard mark the owner is missing.
+
+    Shared by the Mark tab's "Add All Parts" button and by the
+    create-character drawer's Marking option, so both produce exactly the
+    same default character marks. Returns how many marks were created.
+    """
+    store = store or CharacterMarkStore()
+    used = {p["part_name"] for p in store.list_parts(owner_id)}
+    payload = default_part_payload()
+    added = 0
+    for name in store.part_names:
+        if name in used:
+            continue
+        used.add(name)  # a name listed twice in part_names = one part
+        try:
+            store.create_part(owner_id, name, "", payload)
+        except ValueError:
+            continue  # skip names the store rejects
+        added += 1
+    return added
+
+
+def copy_marker_marks(marker_id: int, character_id: int) -> int:
+    """Copy a marker's marks onto a character (same names + box geometry).
+
+    Used by the create-character drawer's Marker option: a new character can
+    start from a marker's markup instead of starting empty. Names already on
+    the character are kept, so this is safe to call again. Returns how many
+    marks were copied.
+    """
+    used = {p["part_name"] for p in database.list_character_parts(character_id)}
+    copied = 0
+    for part in database.list_marker_parts(marker_id):
+        name = part["part_name"]
+        if name in used:
+            continue
+        used.add(name)
+        try:
+            database.create_character_part(
+                character_id, name, part["note"] or "", part["payload"] or "{}"
+            )
+        except ValueError:
+            continue  # skip names the database rejects
+        copied += 1
+    return copied
+
+
 class CharacterMarkStore:
     """Data access used by the Mark tab when the subject is a character.
 
@@ -490,20 +552,6 @@ class MarkCharacterPage(QWidget):
             self.part_input.setCurrentIndex(-1)
             self.part_input.setEditText("")
 
-    @staticmethod
-    def _default_part_payload() -> str:
-        """Default coordinates/size for a new part (drag to reposition later)."""
-        return json.dumps(
-            {
-                "top": 200,
-                "left": 200,
-                "width": 200,
-                "height": 200,
-                "x": 200,
-                "y": 200,
-            }
-        )
-
     def _update_bulk_buttons(self, used: set, part_count: int) -> None:
         """Sync the bulk action buttons with the parts currently added."""
         missing = [name for name in self._store.part_names if name not in used]
@@ -521,7 +569,7 @@ class MarkCharacterPage(QWidget):
         name = self.part_input.currentText().strip()
         if not name:
             return
-        payload = self._default_part_payload()
+        payload = default_part_payload()
         try:
             self._store.create_part(self._character_id, name, "", payload)
         except ValueError as exc:
@@ -543,27 +591,13 @@ class MarkCharacterPage(QWidget):
             self._refresh_parts()
             self._set_status(f"{self._store.kind} no longer exists.")
             return
-        try:
-            parts = self._store.list_parts(self._character_id)
-        except Exception:
-            parts = []
-        used = {p["part_name"] for p in parts}
-        missing = [name for name in self._store.part_names if name not in used]
-        if not missing:
-            self._refresh_parts()
-            self._set_status("All body parts are already added.")
-            return
-        payload = self._default_part_payload()
-        added = 0
-        for name in missing:
-            try:
-                self._store.create_part(self._character_id, name, "", payload)
-            except ValueError:
-                continue  # skip names the database rejects
-            added += 1
+        added = seed_default_marks(self._character_id, self._store)
         self._refresh_parts()
         self._apply_image_view()
-        self._set_status(f"Added {added} missing body part(s).")
+        if added:
+            self._set_status(f"Added {added} missing body part(s).")
+        else:
+            self._set_status("All body parts are already added.")
 
     def _on_delete_all_parts(self) -> None:
         """Remove every body part of the character (after confirmation)."""
