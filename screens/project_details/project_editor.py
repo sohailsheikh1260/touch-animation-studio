@@ -80,6 +80,16 @@ RENDER_MS = 33  # preview re-render throttle (~30 FPS is plenty)
 RULER_SNAP_PX = 8  # timeline drag snapping tolerance
 
 
+def _opt_float(value) -> float | None:
+    """Scene-payload float -> float, or None when it is missing/blank."""
+    if value is None or value == "":
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
 class ProjectEditorPage(AudioEditorMixin, PreviewEditorMixin, QWidget):
     """Video-editor styled page for a project."""
 
@@ -153,6 +163,10 @@ class ProjectEditorPage(AudioEditorMixin, PreviewEditorMixin, QWidget):
         self.left_sidebar.on_zoom_changed = self._on_zoom_changed
         self.left_sidebar.on_zoom_commit = self._on_zoom_commit
         self.left_sidebar.on_nudge = self._on_nudge
+        # Tools tab: "Save Scene" -> capture the timeline range as a scene.
+        self.left_sidebar.on_save_scene = self._on_save_scene
+        # Scenes tab: "Import" -> drop a saved scene in at the playhead.
+        self.left_sidebar.on_import_scene = self._on_import_scene
 
         root = QVBoxLayout(self)
         root.setContentsMargins(24, 18, 24, 18)
@@ -584,6 +598,10 @@ class ProjectEditorPage(AudioEditorMixin, PreviewEditorMixin, QWidget):
         self.timeline._refresh_size()
         self._fit_timeline_height()
         self._rebuild_track_buttons()
+        # Prefill the Tools tab's Save Scene range with the whole timeline.
+        self.left_sidebar.tools_tab.set_scene_time_range(
+            0.0, self.timeline.total_duration()
+        )
         self._render_preview()
 
     def _refresh_header(self) -> None:
@@ -786,6 +804,163 @@ class ProjectEditorPage(AudioEditorMixin, PreviewEditorMixin, QWidget):
         except Exception:
             pass
         return f"{kind.title()} {asset_id}"
+
+    # --------------------------------------------------------------- scenes
+    @staticmethod
+    def _scene_clip_payload(clip: Clip) -> dict:
+        """JSON-serialisable snapshot of one timeline clip (for the scenes table)."""
+        data = clip.data if clip.data else ("", 0)
+        asset_kind = data[0] if len(data) >= 1 else ""
+        asset_id = data[1] if len(data) >= 2 else 0
+        return {
+            "name": clip.name,
+            "kind": clip.kind,
+            "asset_kind": str(asset_kind or ""),
+            "asset_id": int(asset_id or 0),
+            "start": float(clip.start),
+            "duration": float(clip.duration),
+            "track": int(getattr(clip, "track", 0) or 0),
+            "animation": str(getattr(clip, "animation", "idle") or "idle"),
+            "text": str(getattr(clip, "text", "") or ""),
+            "x_offset": float(getattr(clip, "x_offset", 0.0) or 0.0),
+            "y_offset": float(getattr(clip, "y_offset", 0.0) or 0.0),
+            "size_scale": float(getattr(clip, "size_scale", 1.0) or 1.0),
+            "x_end": _opt_float(getattr(clip, "x_end", None)),
+            "y_end": _opt_float(getattr(clip, "y_end", None)),
+            "anim_speed": float(getattr(clip, "anim_speed", 1.0) or 1.0),
+            "zoom_start": float(getattr(clip, "zoom_start", 1.0) or 1.0),
+            "zoom_end": _opt_float(getattr(clip, "zoom_end", None)),
+            "flip_h": bool(getattr(clip, "flip_h", False)),
+            "flip_v": bool(getattr(clip, "flip_v", False)),
+        }
+
+    def _on_save_scene(self, name: str, start: float, end: float) -> None:
+        """Save the clips inside [start, end] to the scenes table."""
+        name = (name or "").strip()
+        if not name:
+            self.status_label.setText("Enter a scene name before saving.")
+            return
+        if self.project_id is None:
+            self.status_label.setText("Open a project first.")
+            return
+        start, end = float(start), float(end)
+        if end <= start:
+            self.status_label.setText("Scene end time must be after its start time.")
+            return
+
+        payload = [
+            self._scene_clip_payload(clip)
+            for clip in self.timeline.scene_clips
+            if clip.start < end and clip.start + clip.duration > start
+        ]
+        try:
+            database.create_scene(name, start, end, payload)
+        except ValueError as exc:
+            self.status_label.setText(str(exc))
+            return
+        self.left_sidebar.refresh_scenes()
+        self.left_sidebar.show_tab("scenes")
+        self.status_label.setText(
+            f"Saved scene '{name}' ({len(payload)} clip(s)) — global, listed in the Scenes tab."
+        )
+
+    def _on_import_scene(self, scene_id: int) -> None:
+        """Put a saved scene on the canvas starting at the current playhead.
+
+        Scenes are global, so a scene saved in another project imports here
+        just the same.
+        """
+        if self.project_id is None:
+            self.status_label.setText("Open a project first.")
+            return
+        scene = database.get_scene(scene_id)
+        if scene is None:
+            self.status_label.setText("That scene no longer exists.")
+            return
+        payload = database.scene_clip_payload(scene)
+        if not payload:
+            self.status_label.setText(
+                f"Scene '{scene['name']}' has no clips to import."
+            )
+            return
+        if self.playing:
+            self._stop_playback()
+        self._flush_deferred()
+
+        # The scene starts wherever the playhead currently sits (e.g. 4s).
+        base = float(self.timeline.playhead)
+        delta = base - float(scene["start_time"])
+        imported = 0
+        first_track = None
+        for data in payload:
+            if not isinstance(data, dict):
+                continue
+            clip_start = max(0.0, float(_opt_float(data.get("start")) or 0.0) + delta)
+            duration = _opt_float(data.get("duration")) or 1.0
+            if duration <= 0:
+                duration = 1.0
+            try:
+                track = max(0, int(data.get("track", 0) or 0))
+            except (TypeError, ValueError):
+                track = 0
+            while self.timeline.num_scene_tracks() <= track:
+                self.timeline.add_empty_track()
+
+            asset_kind = str(data.get("asset_kind") or "")
+            asset_id = data.get("asset_id") or 0
+            try:
+                asset_id = int(asset_id)
+            except (TypeError, ValueError):
+                asset_id = 0
+            fallback = (
+                self._asset_display_name(asset_kind, asset_id)
+                if asset_kind
+                else "Scene clip"
+            )
+            clip_name = str(data.get("name") or "").strip() or fallback
+            clip = Clip(
+                clip_start,
+                duration,
+                clip_name,
+                "scene",
+                (asset_kind, asset_id),
+                track=track,
+                animation=str(data.get("animation") or "idle"),
+                x_offset=float(_opt_float(data.get("x_offset")) or 0.0),
+                y_offset=float(_opt_float(data.get("y_offset")) or 0.0),
+                size_scale=float(_opt_float(data.get("size_scale")) or 1.0),
+                x_end=_opt_float(data.get("x_end")),
+                y_end=_opt_float(data.get("y_end")),
+                anim_speed=float(_opt_float(data.get("anim_speed")) or 1.0),
+                zoom_start=float(_opt_float(data.get("zoom_start")) or 1.0),
+                zoom_end=_opt_float(data.get("zoom_end")),
+                text=str(data.get("text") or ""),
+                flip_h=bool(data.get("flip_h")),
+                flip_v=bool(data.get("flip_v")),
+            )
+            self.timeline.scene_clips.append(clip)
+            if first_track is None:
+                first_track = track
+                self.timeline.selected_uid = clip.uid
+            imported += 1
+
+        if not imported:
+            self.status_label.setText(
+                f"Scene '{scene['name']}' could not be imported."
+            )
+            return
+
+        self.timeline.selected_track = first_track
+        self.timeline._refresh_size()
+        self._rebuild_track_buttons()
+        self._fit_timeline_height()
+        self.timeline.set_playhead(base)
+        self._update_time_label()
+        self._on_timeline_change()
+        self._render_preview()
+        self.status_label.setText(
+            f"Imported scene '{scene['name']}' at {base:.1f}s ({imported} clip(s))."
+        )
 
     def _on_play_toggle(self) -> None:
         if self.playing:

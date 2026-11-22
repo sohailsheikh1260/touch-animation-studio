@@ -42,6 +42,7 @@ from screens.background.background_screen import INFO as BACKGROUND_INFO, Backgr
 from screens.character.character_screen import INFO as CHARACTER_INFO, CharacterScreen
 from screens.marker.marker_screen import INFO as MARKER_INFO, MarkerScreen
 from screens.project.project_screen import INFO as PROJECT_INFO, ProjectScreen
+from screens.since.since_screen import INFO as SINCE_INFO, SinceScreen
 from screens.skeleton_master.skeleton_master_screen import INFO as SKELETON_MASTER_INFO, SkeletonMasterScreen
 from screens.theme import BG, CARD_LABEL_STYLE, CARD_STYLE, MUTED, TEXT
 
@@ -53,6 +54,7 @@ MODULES = [
     (*AUDIO_INFO, AudioScreen),
     (*SKELETON_MASTER_INFO, SkeletonMasterScreen),
     (*MARKER_INFO, MarkerScreen),
+    (*SINCE_INFO, SinceScreen),
 ]
 
 

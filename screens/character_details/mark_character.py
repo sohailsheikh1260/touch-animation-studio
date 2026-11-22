@@ -26,11 +26,11 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from config import BODY_PARTS
 import database
 from screens.character import image_store
 from screens.character_details.export import export_character, import_character
 from screens.character_details.styles import (
-    ALL_PART_NAMES,
     DELETE_BUTTON_STYLE,
     HEADING_STYLE,
     IMAGE_PANEL_STYLE,
@@ -123,7 +123,7 @@ class CharacterMarkStore:
 
     kind = "Character"
     icon = ICON
-    part_names = ALL_PART_NAMES
+    part_names = BODY_PARTS
     image_store = image_store  # screens.character.image_store
     fill_canvas = False  # keep the source aspect ratio on the 2048² canvas
 

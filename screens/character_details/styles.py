@@ -43,38 +43,8 @@ MUTED_TEXT = f"color: {MUTED}; font-size: 13px;"
 INFO_TEXT = f"color: {TEXT}; font-size: 14px;"
 HEADING_STYLE = f"color: {TEXT}; font-size: 16px; font-weight: bold; {CARD_LABEL_STYLE}"
 
-ALL_PART_NAMES = [
-    "torso",
-    "head",
-    "eyes-background",
-    "eyes-open",
-    "eyebro-normal",
-    "eyebrow-angry",
-    "mouth-closed",
-    "mouth-open",
-    "mouth-smile",
-    "mouth-angry",
-    "eye-close",
-    "left-arm",
-    "left-forearm",
-    "right-arm",
-    "right-forearm",
-    "left-leg",
-    "left-shin",
-    "right-leg",
-    "right-shin",
-    "left-hand-open",
-    "left-hand-close",
-    "left-hand-point",
-    "left-hand-grab",
-    "right-hand-open",
-    "right-hand-close",
-    "right-hand-point",
-    "right-hand-grab",
-
-
-  
-]
+# The default body-part list lives in config.BODY_PARTS (single source of
+# truth shared by the Mark tab, the Skeleton tab and the Marker module).
 
 
 from PySide6.QtCore import Qt

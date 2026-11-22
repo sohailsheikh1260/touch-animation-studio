@@ -183,6 +183,21 @@ def init_db() -> None:
         )
         conn.execute(
             """
+            CREATE TABLE IF NOT EXISTS scenes (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                project_id  INTEGER,
+                name        TEXT    NOT NULL,
+                start_time  REAL    NOT NULL DEFAULT 0,
+                end_time    REAL    NOT NULL DEFAULT 0,
+                clips       TEXT    NOT NULL DEFAULT '[]',
+                created_at  TEXT    NOT NULL,
+                updated_at  TEXT    NOT NULL,
+                FOREIGN KEY (project_id) REFERENCES projects (id) ON DELETE CASCADE
+            )
+            """
+        )
+        conn.execute(
+            """
             CREATE TABLE IF NOT EXISTS character_animations (
                 id             INTEGER PRIMARY KEY AUTOINCREMENT,
                 character_id   INTEGER NOT NULL,
@@ -557,6 +572,38 @@ def _migrate() -> None:
             """
         ).fetchall():
             _copy_skeleton_bones(conn, row["character_id"], row["skeleton_id"])
+
+        # scenes: project_id became optional. Saved scenes are global now -
+        # one scene is usable from every project - so new rows store NULL and
+        # nothing ever filters on this column (existing rows keep their origin).
+        scene_cols = conn.execute("PRAGMA table_info(scenes)").fetchall()
+        if scene_cols and any(
+            c["name"] == "project_id" and c["notnull"] for c in scene_cols
+        ):
+            conn.execute("ALTER TABLE scenes RENAME TO scenes_legacy")
+            conn.execute(
+                """
+                CREATE TABLE scenes (
+                    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                    project_id  INTEGER,
+                    name        TEXT    NOT NULL,
+                    start_time  REAL    NOT NULL DEFAULT 0,
+                    end_time    REAL    NOT NULL DEFAULT 0,
+                    clips       TEXT    NOT NULL DEFAULT '[]',
+                    created_at  TEXT    NOT NULL,
+                    updated_at  TEXT    NOT NULL,
+                    FOREIGN KEY (project_id) REFERENCES projects (id) ON DELETE CASCADE
+                )
+                """
+            )
+            conn.execute(
+                "INSERT INTO scenes"
+                " (id, project_id, name, start_time, end_time, clips, created_at, updated_at)"
+                " SELECT id, project_id, name, start_time, end_time, clips,"
+                "        created_at, updated_at"
+                " FROM scenes_legacy"
+            )
+            conn.execute("DROP TABLE scenes_legacy")
         conn.commit()
 
 
@@ -751,6 +798,77 @@ def delete_clips_by_project(project_id: int) -> None:
     with closing(get_connection()) as conn:
         conn.execute("DELETE FROM clips WHERE project_id = ?", (project_id,))
         conn.commit()
+
+
+# ---------------------------------------------------------------------------
+# Scenes (saved timeline ranges) persistence - global, shared by all projects
+# ---------------------------------------------------------------------------
+def create_scene(
+    name: str,
+    start_time: float,
+    end_time: float,
+    clips: list | None = None,
+) -> sqlite3.Row:
+    """Save a scene (a named timeline range plus its clip payload).
+
+    Scenes are global: they are not tied to a project and show up in the
+    Scenes tab of every project. `clips` is a list of JSON-serialisable
+    dicts, one per timeline clip that belongs to the scene. Raises
+    ValueError for an empty name or a start/end range that makes no sense.
+    """
+    name = (name or "").strip()
+    if not name:
+        raise ValueError("Scene name cannot be empty.")
+    start_time = float(start_time)
+    end_time = float(end_time)
+    if end_time <= start_time:
+        raise ValueError("Scene end time must be after its start time.")
+    payload = _json.dumps(list(clips or []), ensure_ascii=False)
+    now = _now()
+    with closing(get_connection()) as conn:
+        cur = conn.execute(
+            "INSERT INTO scenes"
+            " (project_id, name, start_time, end_time, clips, created_at, updated_at)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (None, name, start_time, end_time, payload, now, now),
+        )
+        conn.commit()
+        return get_scene(cur.lastrowid)
+
+
+def get_scene(scene_id: int) -> sqlite3.Row | None:
+    with closing(get_connection()) as conn:
+        return conn.execute(
+            "SELECT * FROM scenes WHERE id = ?", (int(scene_id),)
+        ).fetchone()
+
+
+def list_scenes() -> list[sqlite3.Row]:
+    """Every saved scene (global), newest first."""
+    with closing(get_connection()) as conn:
+        return conn.execute(
+            "SELECT * FROM scenes ORDER BY id DESC"
+        ).fetchall()
+
+
+def scene_clip_payload(scene: sqlite3.Row) -> list:
+    """Decode a scene row's clip payload (empty list when unusable)."""
+    try:
+        data = _json.loads(scene["clips"] or "[]")
+    except (ValueError, TypeError):
+        return []
+    return data if isinstance(data, list) else []
+
+
+def delete_scene(scene_id: int) -> sqlite3.Row | None:
+    """Delete a scene row and return it (None when it does not exist)."""
+    row = get_scene(scene_id)
+    if row is None:
+        return None
+    with closing(get_connection()) as conn:
+        conn.execute("DELETE FROM scenes WHERE id = ?", (int(scene_id),))
+        conn.commit()
+    return row
 
 
 def count_projects() -> int:
@@ -2313,26 +2431,25 @@ def delete_marker_parts_by_marker(marker_id: int) -> None:
 
 DEFAULT_BONES = [
     # (bone_name, parent_name, x_offset, y_offset, length, angle, z_order)
+    # Names mirror config.BODY_PARTS so default bones and body parts line up.
     # Root
-    ("torso", None, 0, 0, 100, 0, 0),
+    ("body", None, 0, 0, 100, 0, 0),
     # Head
-    ("head", "torso", 0, -180, 80, 0, 1),
+    ("head", "body", 0, -180, 80, 0, 1),
     # Left arm
-    ("left_shoulder", "torso", -40, -80, 10, 0, 2),
-    ("left_elbow", "left_shoulder", 0, 50, 50, 0, 3),
-    ("left_wrist", "left_elbow", 0, 50, 50, 0, 4),
+    ("hand_left_upper", "body", -40, -80, 10, 0, 2),
+    ("hand_left_lower", "hand_left_upper", 0, 50, 50, 0, 3),
+    ("hand_left", "hand_left_lower", 0, 50, 50, 0, 4),
     # Right arm
-    ("right_shoulder", "torso", 40, -80, 10, 0, 2),
-    ("right_elbow", "right_shoulder", 0, 50, 50, 0, 3),
-    ("right_wrist", "right_elbow", 0, 50, 50, 0, 4),
+    ("hand_right_upper", "body", 40, -80, 10, 0, 2),
+    ("hand_right_lower", "hand_right_upper", 0, 50, 50, 0, 3),
+    ("hand_right", "hand_right_lower", 0, 50, 50, 0, 4),
     # Left leg
-    ("left_hip", "torso", -20, 20, 10, 0, 2),
-    ("left_knee", "left_hip", 0, 70, 70, 0, 3),
-    ("left_ankle", "left_knee", 0, 70, 70, 0, 4),
+    ("leg_left_upper", "body", -20, 20, 10, 0, 2),
+    ("leg_left_lower", "leg_left_upper", 0, 70, 70, 0, 3),
     # Right leg
-    ("right_hip", "torso", 20, 20, 10, 0, 2),
-    ("right_knee", "right_hip", 0, 70, 70, 0, 3),
-    ("right_ankle", "right_knee", 0, 70, 70, 0, 4),
+    ("leg_right_upper", "body", 20, 20, 10, 0, 2),
+    ("leg_right_lower", "leg_right_upper", 0, 70, 70, 0, 3),
 ]
 
 

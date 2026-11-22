@@ -16,13 +16,13 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from config import BODY_PARTS
 import database
 from screens.character_details.skeleton_loader import (
     load_character_skeleton_data,
     part_draw_key,
 )
 from screens.character_details.styles import (
-    ALL_PART_NAMES,
     HEADING_STYLE,
     MUTED,
     TEXT,
@@ -452,7 +452,7 @@ class SkeletonPage(QWidget):
 
                 # Part dropdown directly in the row
                 dropdown = QComboBox()
-                dropdown.addItems(["— None —"] + ALL_PART_NAMES)
+                dropdown.addItems(["— None —"] + BODY_PARTS)
                 dropdown.setToolTip("Choose the body part for this image")
                 dropdown.setStyleSheet(COMBO_STYLE)
                 if part:

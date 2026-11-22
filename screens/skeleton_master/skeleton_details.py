@@ -698,7 +698,7 @@ class SkeletonDetailsPage(QWidget):
         name_hint = QLabel("Bone name")
         name_hint.setStyleSheet(f"color: {MUTED}; font-size: 11px;")
         self.bone_name_input = QLineEdit()
-        self.bone_name_input.setPlaceholderText("e.g. left_elbow")
+        self.bone_name_input.setPlaceholderText("e.g. hand_left_lower")
         self.bone_name_input.setStyleSheet(
             f"QLineEdit {{ background-color: {BG}; color: {TEXT};"
             "  border: 1px solid #334155; border-radius: 6px;"

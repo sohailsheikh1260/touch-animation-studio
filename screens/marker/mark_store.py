@@ -5,6 +5,7 @@ identical UI against markers: same canvas, zoom/pan, markup boxes - but the
 rows live in marker_parts / markers instead of character_parts / characters.
 """
 
+from config import BODY_PARTS
 import database
 from screens.marker import image_store
 
@@ -12,24 +13,7 @@ KIND = "Marker"
 ICON = "📍"
 
 # Suggested markup names shown in the "＋ Add Part" dropdown (free text too).
-MARKER_PART_NAMES = [
-  "head",
-  "body",
-  "hand_left_upper",
-  "hand_left_lower"
-  "hand_right_upper",
-  "hand_right_lower",
-  "leg_left_upper",
-  "leg_left_lower"
-  "leg_right_upper",
-  "leg_right_lower",
-  "lip_happy",
-  "lip_",
-  "lip_",
-  "lip_",
-  "lip_",
-
-]
+# Single source of truth: config.BODY_PARTS.
 
 
 class MarkerMarkStore:
@@ -37,7 +21,7 @@ class MarkerMarkStore:
 
     kind = KIND
     icon = ICON
-    part_names = MARKER_PART_NAMES
+    part_names = BODY_PARTS
     image_store = image_store  # screens.marker.image_store
     fill_canvas = True  # marker image is rendered over the full 2048x2048 canvas
 

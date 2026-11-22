@@ -20,6 +20,13 @@ from screens.theme import BG, MUTED, TEXT
 
 from .common import BUTTON_STYLE, PANEL_LABEL_STYLE, ListTab
 
+SAVE_SCENE_BUTTON_STYLE = (
+    "QPushButton { background-color: #16a34a; color: #e2e8f0;"
+    "  border: none; border-radius: 8px; padding: 7px 14px;"
+    "  font-size: 13px; font-weight: bold; }"
+    "QPushButton:hover { background-color: #22c55e; }"
+)
+
 
 class ToolsTab(ListTab):
     """Editing tools for the currently selected scene clip."""
@@ -29,6 +36,7 @@ class ToolsTab(ListTab):
 
         # Callbacks set by the sidebar.
         self.on_add_text = None          # callable(text: str)
+        self.on_save_scene = None        # callable(name: str, start: float, end: float)
         self.on_scale_changed = None     # callable(percent: int)
         self.on_scale_commit = None      # callable()
         self.on_position_changed = None  # callable(point_key, value: int)
@@ -43,12 +51,77 @@ class ToolsTab(ListTab):
         self.flip_h_btn: QPushButton
         self.flip_v_btn: QPushButton
 
+        self._build_scene_tool()
         self._build_text_tool()
         self._build_scale_tool()
         self._build_positions_tool()
         self._build_flip_tool()
 
     # ------------------------------------------------------------- builders
+    def _build_scene_tool(self) -> None:
+        """Scene name / start / end inputs + the Save Scene button."""
+        scene_item = QListWidgetItem()
+        scene_item.setSizeHint(QSize(0, 140))
+        scene_widget = QWidget()
+        scene_widget.setStyleSheet("background: transparent;")
+        scene_col = QVBoxLayout(scene_widget)
+        scene_col.setContentsMargins(8, 6, 8, 6)
+        scene_col.setSpacing(6)
+
+        scene_caption = QLabel("🎬 Save Scene")
+        scene_caption.setStyleSheet(
+            f"color: {TEXT}; font-size: 12px; {PANEL_LABEL_STYLE}"
+        )
+        scene_col.addWidget(scene_caption)
+
+        self.scene_name_input = QLineEdit()
+        self.scene_name_input.setPlaceholderText("Scene name…")
+        self.scene_name_input.setStyleSheet(
+            f"background-color: {BG}; color: {TEXT}; border: 1px solid #334155;"
+            " border-radius: 6px; padding: 4px 8px; font-size: 12px;"
+        )
+        scene_col.addWidget(self.scene_name_input)
+
+        time_row = QHBoxLayout()
+        time_row.setContentsMargins(0, 0, 0, 0)
+        time_row.setSpacing(6)
+
+        for label_text, attr in (("Start", "scene_start_spin"), ("End", "scene_end_spin")):
+            label = QLabel(label_text)
+            label.setStyleSheet(
+                f"background: transparent; color: {TEXT}; font-size: 12px;"
+                f" {PANEL_LABEL_STYLE}"
+            )
+            spin = QDoubleSpinBox()
+            spin.setRange(0.0, 36000.0)
+            spin.setDecimals(1)
+            spin.setSingleStep(0.5)
+            spin.setSuffix("s")
+            spin.setFixedWidth(80)
+            spin.setToolTip("Scene time range on the timeline (seconds)")
+            setattr(self, attr, spin)
+            time_row.addWidget(label)
+            time_row.addWidget(spin)
+        time_row.addStretch()
+        scene_col.addLayout(time_row)
+
+        self.scene_start_spin.setValue(0.0)
+        self.scene_end_spin.setValue(3.0)
+
+        save_scene_btn = QPushButton("💾 Save Scene")
+        save_scene_btn.setCursor(Qt.PointingHandCursor)
+        save_scene_btn.setStyleSheet(SAVE_SCENE_BUTTON_STYLE)
+        save_scene_btn.setToolTip(
+            "Save the clips inside Start/End as a reusable scene (see the Scenes tab)"
+        )
+        save_scene_btn.clicked.connect(self._on_save_scene_clicked)
+        self.scene_name_input.returnPressed.connect(self._on_save_scene_clicked)
+        scene_col.addWidget(save_scene_btn)
+
+        scene_col.addStretch()
+        self.list.addItem(scene_item)
+        self.list.setItemWidget(scene_item, scene_widget)
+
     def _build_text_tool(self) -> None:
         text_item = QListWidgetItem()
         text_item.setSizeHint(QSize(0, 82))
@@ -301,6 +374,29 @@ class ToolsTab(ListTab):
         self.list.setItemWidget(flip_item, flip_widget)
 
     # ------------------------------------------------------------- actions
+    def scene_range(self) -> tuple[str, float, float]:
+        """(name, start, end) currently typed into the Save Scene form."""
+        return (
+            self.scene_name_input.text().strip(),
+            float(self.scene_start_spin.value()),
+            float(self.scene_end_spin.value()),
+        )
+
+    def set_scene_time_range(self, start: float, end: float) -> None:
+        """Prefill the scene range (used when a project is loaded)."""
+        for spin, value in (
+            (self.scene_start_spin, start),
+            (self.scene_end_spin, end),
+        ):
+            spin.blockSignals(True)
+            spin.setValue(max(0.0, float(value)))
+            spin.blockSignals(False)
+
+    def _on_save_scene_clicked(self) -> None:
+        callback = getattr(self, "on_save_scene", None)
+        if callable(callback):
+            callback(*self.scene_range())
+
     def _on_add_text_clicked(self) -> None:
         text = self.text_input.text().strip()
         if not text:

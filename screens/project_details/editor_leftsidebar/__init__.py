@@ -22,6 +22,7 @@ from .common import (
     PANEL_STYLE,
 )
 from .effect_tab import EffectTab
+from .scenes_tab import ScenesTab
 from .tools_tab import ToolsTab
 
 __all__ = [
@@ -61,6 +62,8 @@ class EditorLeftSidebar(QFrame):
         self.on_nudge = None                 # callable(direction: str)
         self.on_zoom_changed = None          # callable(point_key: str, value: int)
         self.on_zoom_commit = None           # callable()
+        self.on_save_scene = None            # callable(name, start: float, end: float)
+        self.on_import_scene = None          # callable(scene_id: int)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(12, 10, 12, 12)
@@ -75,7 +78,7 @@ class EditorLeftSidebar(QFrame):
 
         # ---- Category switcher buttons at top ----
         btn_row = QHBoxLayout()
-        btn_row.setSpacing(4)
+        btn_row.setSpacing(2)
         self._lib_buttons = {}
         for key, label in (
             ("character", "Char"),
@@ -83,6 +86,7 @@ class EditorLeftSidebar(QFrame):
             ("audio", "Audio"),
             ("animation", "Anim"),
             ("tools", "Tools"),
+            ("scenes", "Scenes"),
             ("effect", "Effect"),
             ("chat", "Chat"),
         ):
@@ -90,8 +94,8 @@ class EditorLeftSidebar(QFrame):
             button.setCursor(Qt.PointingHandCursor)
             button.setStyleSheet(
                 BUTTON_STYLE
-                # one more tab: tighter padding so all five fit
-                + "QPushButton { padding: 8px 4px; font-size: 12px; }"
+                # eight tabs: tighter padding/font so all of them fit
+                + "QPushButton { padding: 8px 2px; font-size: 11px; }"
                 + "QPushButton:checked { background-color: #1d4ed8; }"
             )
             button.setCheckable(True)
@@ -108,6 +112,7 @@ class EditorLeftSidebar(QFrame):
         self.audio_tab = AudioTab()
         self.animation_tab = AnimationTab()
         self.tools_tab = ToolsTab()
+        self.scenes_tab = ScenesTab()
         self.effect_tab = EffectTab()
         self.chat_tab = ChatTab()
 
@@ -117,6 +122,7 @@ class EditorLeftSidebar(QFrame):
             "audio": self.audio_tab,
             "animation": self.animation_tab,
             "tools": self.tools_tab,
+            "scenes": self.scenes_tab,
             "effect": self.effect_tab,
             "chat": self.chat_tab,
         }
@@ -131,6 +137,7 @@ class EditorLeftSidebar(QFrame):
         self.audio_list = self.audio_tab.list
         self.animation_list = self.animation_tab.list
         self.tools_list = self.tools_tab.list
+        self.scenes_list = self.scenes_tab.list
         self.effect_list = self.effect_tab.list
         self.chat_panel = self.chat_tab.panel
 
@@ -220,6 +227,14 @@ class EditorLeftSidebar(QFrame):
         self.tools_tab.on_nudge = (
             lambda direction: self._dispatch("on_nudge", direction)
         )
+        self.tools_tab.on_save_scene = (
+            lambda name, start, end: self._dispatch(
+                "on_save_scene", name, start, end
+            )
+        )
+        self.scenes_tab.on_import = (
+            lambda scene_id: self._dispatch("on_import_scene", scene_id)
+        )
 
         self.effect_tab.on_zoom_changed = (
             lambda key, value: self._dispatch("on_zoom_changed", key, value)
@@ -261,12 +276,22 @@ class EditorLeftSidebar(QFrame):
         self.project_id = int(project_id) if project_id is not None else None
         self.audio_tab.set_project(self.project_id)
 
+    def show_tab(self, key: str) -> None:
+        """Switch the sidebar to one of its category tabs (e.g. "scenes")."""
+        if key in self._tabs:
+            self._switch_library(key)
+
+    def refresh_scenes(self) -> None:
+        """Reload the Scenes tab (scenes are global, not per project)."""
+        self.scenes_tab.refresh()
+
     def _refresh_media(self) -> None:
         self.character_tab.refresh()
         self.background_tab.refresh()
         self.audio_tab.set_project(self.project_id)
         self.audio_tab.refresh()
         self.refresh_animations()
+        self.refresh_scenes()
 
     def refresh_animations(self) -> None:
         """Fill the Animations tab with only the selected character's animations."""
